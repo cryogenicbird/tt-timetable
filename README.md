@@ -1,5 +1,7 @@
 # TimetableApp 课表 App
 
+<img width="1264" height="2780" alt="Screenshot_2026-08-30-16-59-55-93_1f1f93d5f0907c" src="https://github.com/user-attachments/assets/0380fdce-0985-4fa8-b281-8a741ff2ff13" />
+
 一款 React Native 写的安卓课表应用：导入文本课表 → 按周展示课程，支持手势切周、相册背景、时间线标记。
 
 ## 功能
