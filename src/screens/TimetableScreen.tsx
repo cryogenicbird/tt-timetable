@@ -8,14 +8,15 @@ import {
   Alert,
   Animated,
   PanResponder,
-  Modal,
   TextInput,
   ImageBackground,
+  NativeModules,
   useWindowDimensions,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import parseTextTimetable, {Course} from '../utils/parseTextTimetable';
 import {loadFolderImages} from '../utils/loadFolderImages';
+import BaseModal from '../component/BaseModal';
 
 // 默认背景图片
 const DEFAULT_BACKGROUND = require('../pic/1.jpg');
@@ -81,12 +82,12 @@ const getCurrentWeek = (dateStr: string) => {
 export default function TimetableScreen() {
   const [courses, setCourses] = useState<Course[]>([]);
   const [currentWeek, setCurrentWeek] = useState(1);
-  const [settingsModalVisible, setSettingsModalVisible] = useState(false);
-  const [importModalVisible, setImportModalVisible] = useState(false);
-  const [dateModalVisible, setDateModalVisible] = useState(false);
   const [textContent, setTextContent] = useState('');
   const [semesterStartDate, setSemesterStartDate] = useState('');
   const [selectedBgUri, setSelectedBgUri] = useState<string | null>(null);
+  const [activeModal, setActiveModal] = useState<
+    'settings' | 'import' | 'date' | 'period' | null
+  >(null);
 
   // 加载并随机选择背景图片
   const loadBackgroundImage = async () => {
@@ -202,9 +203,11 @@ export default function TimetableScreen() {
         if (dx < -25) {
           const newWeek = currentWeek + 1;
           setCurrentWeek(newWeek);
+          NativeModules.VibrationModule.vibrate(100); // 切周成功：短震动反馈
         } else if (dx > 25 && currentWeek > 1) {
           const newWeek = currentWeek - 1;
           setCurrentWeek(newWeek);
+          NativeModules.VibrationModule.vibrate(100);
         }
       }
       springBack();
@@ -239,7 +242,7 @@ export default function TimetableScreen() {
             : `第 ${currentWeek} 周`}
         </Text>
 
-        <TouchableOpacity onPress={() => setSettingsModalVisible(true)}>
+        <TouchableOpacity onPress={() => setActiveModal('settings')}>
           <Text style={styles.gear}>⚙️</Text>
         </TouchableOpacity>
       </View>
@@ -342,195 +345,159 @@ export default function TimetableScreen() {
       </Animated.View>
 
       {/* 导入弹窗 */}
-      <Modal
-        visible={importModalVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setImportModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>导入课表（文本）</Text>
-              <TouchableOpacity onPress={() => setImportModalVisible(false)}>
-                <Text style={styles.closeButton}>×</Text>
-              </TouchableOpacity>
-            </View>
+      <BaseModal
+        visible={activeModal === 'import'}
+        title="导入课表"
+        onClose={() => setActiveModal(null)}>
+        <Text style={[styles.modalSubtitle, {fontSize: 14}]}>
+          请按以下格式粘贴课表文本（可从截图识别）：周一 C语言程序设计 王老师
+          1-2节 D1211 3-7周
+        </Text>
 
-            <Text style={[styles.modalSubtitle, {fontSize: 14}]}>
-              请按以下格式粘贴课表文本（可从截图识别）：周一 C语言程序设计
-              王老师 1-2节 D1211 3-7周
-            </Text>
+        <TextInput
+          style={styles.textInput}
+          value={textContent}
+          onChangeText={setTextContent}
+          multiline={true}
+          placeholder="例如：周一 C语言程序设计 王老师 1-2节 D1211 3-7周"
+          textAlignVertical="top"
+        />
 
-            <TextInput
-              style={styles.textInput}
-              value={textContent}
-              onChangeText={setTextContent}
-              multiline={true}
-              placeholder="例如：周一 C语言程序设计 王老师 1-2节 D1211 3-7周"
-              textAlignVertical="top"
-            />
+        <TouchableOpacity
+          style={styles.importButton}
+          onPress={async () => {
+            try {
+              if (!textContent.trim()) {
+                Alert.alert('提示', '请输入课表内容');
+                return;
+              }
+              const parsed = parseTextTimetable(textContent);
+              if (parsed.length === 0) {
+                Alert.alert('提示', '未解析到课程数据');
+                return;
+              }
+              await AsyncStorage.setItem(
+                'parsedCourses',
+                JSON.stringify(parsed),
+              );
+              setCourses(parsed);
+              Alert.alert('成功', `共导入 ${parsed.length} 条记录`);
+              setActiveModal(null);
+              setTextContent('');
+            } catch (err) {
+              console.error(err);
+              Alert.alert(
+                '导入失败',
+                err instanceof Error ? err.message : '解析失败',
+              );
+            }
+          }}>
+          <Text style={styles.importButtonText}>导入</Text>
+        </TouchableOpacity>
+      </BaseModal>
 
-            <TouchableOpacity
-              style={styles.importButton}
-              onPress={async () => {
-                try {
-                  if (!textContent.trim()) {
-                    Alert.alert('提示', '请输入课表内容');
-                    return;
-                  }
-                  const parsed = parseTextTimetable(textContent);
-                  if (parsed.length === 0) {
-                    Alert.alert('提示', '未解析到课程数据');
-                    return;
-                  }
-                  await AsyncStorage.setItem(
-                    'parsedCourses',
-                    JSON.stringify(parsed),
-                  );
-                  setCourses(parsed);
-                  Alert.alert('成功', `共导入 ${parsed.length} 条记录`);
-                  setImportModalVisible(false);
-                  setTextContent('');
-                } catch (err) {
-                  console.error(err);
-                  Alert.alert(
-                    '导入失败',
-                    err instanceof Error ? err.message : '解析失败',
-                  );
-                }
-              }}>
-              <Text style={styles.importButtonText}>导入</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      {/* 设置弹窗 */}
+      <BaseModal
+        title="设置"
+        visible={activeModal === 'settings'}
+        onClose={() => setActiveModal(null)}>
+        <TouchableOpacity
+          style={[styles.settingsButton, {marginTop: 20}]}
+          onPress={() => setActiveModal('import')}>
+          <Text style={styles.settingsButtonText}>导入课表</Text>
+        </TouchableOpacity>
 
-      {/* 设置先导窗口 */}
-      <Modal
-        visible={settingsModalVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setSettingsModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>设置</Text>
-              <TouchableOpacity onPress={() => setSettingsModalVisible(false)}>
-                <Text style={styles.closeButton}>×</Text>
-              </TouchableOpacity>
-            </View>
+        <TouchableOpacity
+          style={styles.settingsButton}
+          onPress={() => setActiveModal('date')}>
+          <Text style={styles.settingsButtonText}>设置第一周周一的日期</Text>
+        </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.settingsButton, {marginTop: 20}]}
-              onPress={() => {
-                setSettingsModalVisible(false);
-                setImportModalVisible(true);
-              }}>
-              <Text style={styles.settingsButtonText}>导入课表</Text>
-            </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.settingsButton}
+          onPress={() => setActiveModal('period')}>
+          <Text style={styles.settingsButtonText}>时段设置</Text>
+        </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.settingsButton}
-              onPress={() => {
-                setSettingsModalVisible(false);
-                setDateModalVisible(true);
-              }}>
-              <Text style={styles.settingsButtonText}>
-                设置第一周周一的日期
-              </Text>
-            </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.settingsButton, {backgroundColor: '#FF3B30'}]}
+          onPress={() => {
+            setActiveModal(null);
+            Alert.alert('提示', '主人要清空课表吗o(=•ェ•=)m', [
+              {text: '算了', style: 'cancel'},
+              {text: '确定', onPress: clearCourses},
+            ]);
+          }}>
+          <Text style={[styles.settingsButtonText, {color: '#fff'}]}>
+            清空课表
+          </Text>
+        </TouchableOpacity>
+      </BaseModal>
 
-            <TouchableOpacity
-              style={[styles.settingsButton, {backgroundColor: '#FF3B30'}]}
-              onPress={() => {
-                setSettingsModalVisible(false);
-                Alert.alert('提示', '主人要清空课表吗o(=•ェ•=)m', [
-                  {
-                    text: '算了',
-                    style: 'cancel',
-                  },
-                  {
-                    text: '确定',
-                    onPress: clearCourses,
-                  },
-                ]);
-              }}>
-              <Text style={[styles.settingsButtonText, {color: '#fff'}]}>
-                清空课表
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      {/* 日期弹窗 */}
+      <BaseModal
+        title="选择学期开始日期"
+        visible={activeModal === 'date'}
+        onClose={() => setActiveModal(null)}>
+        <Text
+          style={[
+            styles.modalSubtitle,
+            {fontSize: 14, marginTop: 20, marginBottom: 10},
+          ]}>
+          请输入第一周周一的日期（如2026.3.1）：
+        </Text>
 
-      {/* 日期选择窗口 */}
-      <Modal
-        visible={dateModalVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setDateModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>选择学期开始日期</Text>
-              <TouchableOpacity onPress={() => setDateModalVisible(false)}>
-                <Text style={styles.closeButton}>×</Text>
-              </TouchableOpacity>
-            </View>
+        <TextInput
+          style={[styles.textInput, {height: 50}]}
+          value={semesterStartDate}
+          onChangeText={setSemesterStartDate}
+          placeholder="如2026.3.1"
+          placeholderTextColor="#999"
+          keyboardType="numbers-and-punctuation"
+        />
 
-            <Text
-              style={[
-                styles.modalSubtitle,
-                {fontSize: 14, marginTop: 20, marginBottom: 10},
-              ]}>
-              请输入第一周周一的日期（如2026.3.1）：
-            </Text>
+        <TouchableOpacity
+          style={[styles.importButton, {marginTop: 30}]}
+          onPress={async () => {
+            try {
+              if (!semesterStartDate.trim()) {
+                Alert.alert('提示', '请输入日期');
+                return;
+              }
 
-            <TextInput
-              style={[styles.textInput, {height: 50}]}
-              value={semesterStartDate}
-              onChangeText={setSemesterStartDate}
-              placeholder="如2026.3.1"
-              placeholderTextColor="#999"
-              keyboardType="numbers-and-punctuation"
-            />
+              // 保存学期开始日期
+              await AsyncStorage.setItem(
+                'semesterStartDate',
+                semesterStartDate,
+              );
 
-            <TouchableOpacity
-              style={[styles.importButton, {marginTop: 30}]}
-              onPress={async () => {
-                try {
-                  if (!semesterStartDate.trim()) {
-                    Alert.alert('提示', '请输入日期');
-                    return;
-                  }
+              // 设置日期后重置为第1周
+              setCurrentWeek(1);
 
-                  // 保存学期开始日期
-                  await AsyncStorage.setItem(
-                    'semesterStartDate',
-                    semesterStartDate,
-                  );
+              // 重新加载课程数据以更新日期显示
+              const saved = await AsyncStorage.getItem('parsedCourses');
+              if (saved) {
+                setCourses(JSON.parse(saved));
+              }
 
-                  // 设置日期后重置为第1周
-                  setCurrentWeek(1);
+              Alert.alert('成功', '学期开始日期已设置');
+              setActiveModal(null);
+            } catch (error) {
+              console.error(error);
+              Alert.alert('错误', '设置失败');
+            }
+          }}>
+          <Text style={styles.importButtonText}>确定</Text>
+        </TouchableOpacity>
+      </BaseModal>
 
-                  // 重新加载课程数据以更新日期显示
-                  const saved = await AsyncStorage.getItem('parsedCourses');
-                  if (saved) {
-                    setCourses(JSON.parse(saved));
-                  }
-
-                  Alert.alert('成功', '学期开始日期已设置');
-                  setDateModalVisible(false);
-                } catch (error) {
-                  console.error(error);
-                  Alert.alert('错误', '设置失败');
-                }
-              }}>
-              <Text style={styles.importButtonText}>确定</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      {/* 时段设置弹窗（待实现） */}
+      <BaseModal
+        title="时段设置"
+        visible={activeModal === 'period'}
+        onClose={() => setActiveModal(null)}>
+        <Text style={styles.modalSubtitle}>时段设置功能开发中…</Text>
+      </BaseModal>
     </ImageBackground>
   );
 }
@@ -593,26 +560,6 @@ const styles = StyleSheet.create({
   courseTeacher: {color: '#fff', fontSize: 11, opacity: 0.85},
   courseLocation: {color: '#fff', fontSize: 12, marginTop: 2},
 
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    padding: 24,
-    borderRadius: 12,
-    width: '85%',
-    maxWidth: 400,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  modalTitle: {fontSize: 22, fontWeight: 'bold', flex: 1, textAlign: 'center'},
-  closeButton: {fontSize: 28, color: '#666'},
   modalSubtitle: {color: '#666', textAlign: 'center', marginBottom: 20},
 
   textInput: {
