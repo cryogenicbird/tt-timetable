@@ -1,5 +1,5 @@
 import React from 'react';
-import {View, Text, TouchableOpacity, Modal, StyleSheet} from 'react-native';
+import {View, Text, TouchableOpacity, Modal, StyleSheet, StatusBar} from 'react-native';
 
 interface BaseModalProps {
   visible: boolean;
@@ -18,6 +18,7 @@ export default function BaseModal({
     <Modal
       visible={visible}
       transparent={true}
+      statusBarTranslucent={true}
       animationType="fade"
       onRequestClose={onClose}>
       <View style={styles.modalOverlay}>

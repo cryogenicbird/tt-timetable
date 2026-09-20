@@ -12,23 +12,35 @@ import {
   ImageBackground,
   NativeModules,
   useWindowDimensions,
+  StatusBar,
+  Switch,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import parseTextTimetable, {Course} from '../utils/parseTextTimetable';
 import {loadFolderImages} from '../utils/loadFolderImages';
 import BaseModal from '../component/BaseModal';
+import SliderBase from '@react-native-community/slider';
+
+const Slider = SliderBase as unknown as React.ComponentType<any>;
 
 // 默认背景图片
 const DEFAULT_BACKGROUND = require('../pic/1.jpg');
 
 /** 午休的空隙 */
-const LUNCH_GAP = 20;
+const LUNCH_GAP = 5;
 
 /** 每节课高度 */
 const CLASS_HEIGHT = 60;
 
 /** 星期显示 */
 const weekdays = ['一', '二', '三', '四', '五', '六', '日'];
+
+/** 0~1 的透明度 → 两位十六进制（FF=完全不透明） */
+const alphaToHex = (alpha: number) =>
+  Math.round(alpha * 255)
+    .toString(16)
+    .padStart(2, '0')
+    .toUpperCase();
 
 /** 课程颜色 */
 const courseColors = [
@@ -40,22 +52,6 @@ const courseColors = [
   '#607D8B',
   '#FF5722',
   '#4CAF50',
-];
-
-/** 每节课的开始时间（索引 0 = 第 1 节；7-10 节按本学期实际时间自行修改） */
-const SECTION_TIMES = [
-  '08:30',
-  '09:25',
-  '10:30',
-  '11:25',
-  '13:30',
-  '14:25',
-  '15:20',
-  '16:25',
-  '17:20',
-  '18:05',
-  '19:00',
-  '19:55',
 ];
 
 /** 解析学期开始日期，返回第一周周一 */
@@ -86,9 +82,24 @@ export default function TimetableScreen() {
   const [semesterStartDate, setSemesterStartDate] = useState('');
   const [selectedBgUri, setSelectedBgUri] = useState<string | null>(null);
   const [activeModal, setActiveModal] = useState<
-    'settings' | 'import' | 'date' | 'period' | null
+    'settings' | 'import' | 'date' | 'period' | 'appearance' |null
   >(null);
-
+  const [Section_start_times,setSection_start_times]=useState([
+  '08:30',
+  '09:25',
+  '10:30',
+  '11:25',
+  '13:30',
+  '14:25',
+  '15:20',
+  '16:25',
+  '17:20',
+  '19:00',
+  '19:55',
+]);
+const [class_Duration,setClass_Duration]=useState(45);
+const [blockAlpha, setBlockAlpha] = useState(0.5);
+const [markerVisible, setMarkerVisible] = useState(true);
   // 加载并随机选择背景图片
   const loadBackgroundImage = async () => {
     const images = await loadFolderImages('bg');
@@ -103,6 +114,17 @@ export default function TimetableScreen() {
       console.log('未找到相册图片，使用默认背景');
     }
   };
+  //计算top
+  const get_top=(startSection:number)=>startSection<=4
+  ?(startSection-1)*CLASS_HEIGHT
+  :(startSection-5)*CLASS_HEIGHT+LUNCH_GAP+4*CLASS_HEIGHT
+  //计算结束时间
+  const get_end_time=(start_time:string,duration:number)=>{
+    const[h,m]=start_time.split(':').map(Number);
+    const remainder=Math.floor((m+duration)/60);
+    const hour=((h+remainder)%24);
+    const minute=(m+duration)%60;
+    return `${hour.toString().padStart(2,'0')}:${minute.toString().padStart(2,'0')}`}
 
   useEffect(() => {
     (async () => {
@@ -118,12 +140,31 @@ export default function TimetableScreen() {
       }
       // 自动定位到今天所在周（未设置日期时用默认开学日）
       setCurrentWeek(getCurrentWeek(savedDate ?? ''));
+      //加载保存的时段设置
+      const savedSetionStartTimes = await AsyncStorage.getItem("section_start_times");
+      if(savedSetionStartTimes){
+        setSection_start_times(JSON.parse(savedSetionStartTimes));
+      }
 
+      const savedClassDuration=await AsyncStorage.getItem("class_Duration");
+      if(savedClassDuration){
+        setClass_Duration(JSON.parse(savedClassDuration));
+      }
+      // 加载格子透明度
+      const savedAlpha = await AsyncStorage.getItem('block_alpha');
+      if (savedAlpha) {
+        setBlockAlpha(JSON.parse(savedAlpha));
+      }
+      //加载时间标记可见性
+      const savedMarkerVisible = await AsyncStorage.getItem('markerVisible');
+      if (savedMarkerVisible) {
+        setMarkerVisible(JSON.parse(savedMarkerVisible));
+      }
       // 加载相册背景图片
       await loadBackgroundImage();
     })();
   }, []);
-
+  
   // 旋转屏幕时会自动触发重渲染，返回新尺寸
   const {width} = useWindowDimensions();
   /** 每日列宽度 */
@@ -151,14 +192,11 @@ export default function TimetableScreen() {
 
   // 本周有课的节次 → Set 去重 → 排序 → 时间线数据
   const timeMarkers = [...new Set(weekCourses.map(c => c.startSection))]
-    .filter(s => s >= 1 && s <= SECTION_TIMES.length)
+    .filter(s => s >= 1 && s <= Section_start_times.length)
     .sort((a, b) => a - b)
     .map(startSection => ({
-      time: SECTION_TIMES[startSection - 1],
-      top:
-        startSection <= 4
-          ? (startSection - 1) * CLASS_HEIGHT
-          : 4 * CLASS_HEIGHT + LUNCH_GAP + (startSection - 5) * CLASS_HEIGHT,
+      time: Section_start_times[startSection - 1],
+      top:get_top(startSection),
     }));
 
   const formatDate = (date: Date) => {
@@ -234,18 +272,24 @@ export default function TimetableScreen() {
       source={selectedBgUri ? {uri: selectedBgUri} : DEFAULT_BACKGROUND}
       style={styles.container}
       resizeMode="cover">
+        <StatusBar
+        translucent={true}
+        backgroundColor="transparent"
+        barStyle="light-content"
+        />
       {/* 顶部 */}
       <View style={styles.header}>
         <Text style={styles.weekText}>
           {courses.length === 0
-            ? '主人目前还没导入课表呢 *-*'
-            : `第 ${currentWeek} 周`}
+            ? '目前还没导入课表呢 *-*'
+            : `       第 ${currentWeek} 周`}
         </Text>
 
         <TouchableOpacity onPress={() => setActiveModal('settings')}>
-          <Text style={styles.gear}>⚙️</Text>
+          <Text style={styles.gear}>🔧</Text>
         </TouchableOpacity>
       </View>
+
 
       {/* 星期栏 */}
       <View style={styles.weekRow}>
@@ -261,7 +305,7 @@ export default function TimetableScreen() {
       <Animated.View
         style={{flex: 1, transform: [{translateX}]}}
         {...panResponder.panHandlers}>
-        <ScrollView>
+        <ScrollView contentContainerStyle={{paddingTop: 8}}>
           {/* 课程格子的画布 */}
           <View
             style={[
@@ -272,29 +316,17 @@ export default function TimetableScreen() {
               },
             ]}>
             {/* 时间虚线（渲染在课程格子下方） */}
-            {timeMarkers.map(({time, top}) => (
+            {markerVisible&&timeMarkers.map(({time, top}) => (
               <View
                 key={time}
-                style={[styles.timeMarker, {top, width: dayWidth * 7}]}>
+                style={[styles.timeMarker, {top:top-8, width: dayWidth * 7}]}>
                 <View style={styles.timeDash} />
                 <Text style={styles.timeText}>{time}</Text>
                 <View style={styles.timeDash} />
               </View>
             ))}
             {weekCourses.map((c, index) => {
-              /** Y 坐标根据午休调整 */
-              let top = 0;
-              if (c.startSection <= 4) {
-                top = (c.startSection - 1) * CLASS_HEIGHT;
-              } else {
-                top =
-                  4 * CLASS_HEIGHT +
-                  LUNCH_GAP +
-                  (c.startSection - 5) * CLASS_HEIGHT;
-              }
-
               const height = (c.endSection - c.startSection + 1) * CLASS_HEIGHT;
-
               return (
                 <View
                   key={index}
@@ -302,10 +334,10 @@ export default function TimetableScreen() {
                     styles.courseBlock,
                     {
                       left: (c.day - 1) * dayWidth,
-                      top,
+                      top: get_top(c.startSection),
                       width: dayWidth - 6,
                       height,
-                      backgroundColor: getCourseColor(index),
+                      backgroundColor: getCourseColor(index) + alphaToHex(blockAlpha),
                     },
                   ]}>
                   {/*课程名占据剩余空间，尽可能多显示*/}
@@ -401,6 +433,7 @@ export default function TimetableScreen() {
         title="设置"
         visible={activeModal === 'settings'}
         onClose={() => setActiveModal(null)}>
+        <Text>               自定义课表背景的方法{'\n'}前往相册,创建一个名为“bg”的相册，往里面放入图片即可（多张图片将随机选取），确保课表有读取相册权限</Text>
         <TouchableOpacity
           style={[styles.settingsButton, {marginTop: 20}]}
           onPress={() => setActiveModal('import')}>
@@ -417,6 +450,12 @@ export default function TimetableScreen() {
           style={styles.settingsButton}
           onPress={() => setActiveModal('period')}>
           <Text style={styles.settingsButtonText}>时段设置</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+        style={styles.settingsButton}
+        onPress={()=>setActiveModal('appearance')}>
+          <Text style={styles.settingsButtonText}>外观设置</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -491,12 +530,73 @@ export default function TimetableScreen() {
         </TouchableOpacity>
       </BaseModal>
 
-      {/* 时段设置弹窗（待实现） */}
+      {/* 时段设置弹窗 */}
       <BaseModal
         title="时段设置"
         visible={activeModal === 'period'}
         onClose={() => setActiveModal(null)}>
-        <Text style={styles.modalSubtitle}>时段设置功能开发中…</Text>
+      <View
+      style={[{flexDirection: 'row', alignItems: 'center'}]}>
+        <Text style={styles.periodText}>
+          每节课时长</Text>
+          <TouchableOpacity style={styles.periodButtonBox}
+          onPress={() =>{setClass_Duration(Math.max(1, class_Duration - 1));AsyncStorage.setItem("class_Duration",JSON.stringify(Math.max(1, class_Duration-1)))}} >
+            <Text style={styles.periodButton}>-</Text>
+            </TouchableOpacity>
+            <Text style={styles.periodText}>
+              {class_Duration}  </Text>
+              <TouchableOpacity style={styles.periodButtonBox}
+              onPress={() => {setClass_Duration(class_Duration + 1); AsyncStorage.setItem("class_Duration", JSON.stringify(class_Duration+1));}} >
+                <Text style={styles.periodButton}>+</Text>
+                </TouchableOpacity></View>
+        {Section_start_times.map((time,i)=>
+          <View
+            key={i}
+            style={[{flexDirection:'row',alignItems: 'center'}]}>
+              <Text style={styles.periodLabel}>第{i+1}节:</Text>
+              <TextInput
+                style={[styles.textInput,{height:40,width:70,padding:4,fontSize:13,marginBottom:0}]}
+                value={Section_start_times[i]}
+                onEndEditing={()=>{AsyncStorage.setItem("section_start_times",JSON.stringify(Section_start_times))}}
+                onChangeText={(newTime)=>{setSection_start_times(prev=>prev.map((t,index)=>i===index?newTime:t))}}>
+              </TextInput>
+              <Text style={styles.periodLabel}>~</Text>
+
+              <Text style={styles.periodLabel}>
+              {get_end_time(Section_start_times[i], class_Duration)}
+              </Text></View>
+        )}
+      </BaseModal>
+      {/* 外观设置弹窗 */}
+      <BaseModal
+      visible={activeModal === 'appearance'}
+      title="外观设置"
+      onClose={()=>setActiveModal(null)}
+    >
+       {/* 透明度滑块 */}
+      <View style={{paddingHorizontal: 20}}>
+        <Text style={styles.periodLabel}>
+          课程格子透明度：{Math.round(blockAlpha * 100)}%
+        </Text>
+        <Slider
+          style={{width: '100%', height: 40}}
+          minimumValue={0}
+          maximumValue={1}
+          step={0.05}
+          value={blockAlpha}
+          onValueChange={setBlockAlpha}
+          onSlidingComplete={(value:number) => {AsyncStorage.setItem('block_alpha', JSON.stringify(value));}}
+        />
+      </View>
+      <View>
+        <Text style={styles.periodLabel}>
+          时间标记可见性：
+        </Text>
+        <Switch
+          value={markerVisible}
+          onValueChange={(v)=>{setMarkerVisible(v); AsyncStorage.setItem('markerVisible', JSON.stringify(v));}}
+        />
+      </View>
       </BaseModal>
     </ImageBackground>
   );
@@ -512,7 +612,9 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    padding: 12,
+    padding: 1,
+    paddingTop:(StatusBar.currentHeight??5),
+    paddingHorizontal:5,
     backgroundColor: 'transparent',
   },
   weekText: {
@@ -540,13 +642,14 @@ const styles = StyleSheet.create({
     left: 0,
     flexDirection: 'row',
     alignItems: 'center',
+    zIndex:1
   },
   timeDash: {
     flex: 1,
     borderTopWidth: 1,
     borderStyle: 'dashed',
     borderColor: 'rgba(0,0,0,0.35)',
-    marginHorizontal: 6,
+    marginHorizontal: 1,
   },
   timeText: {fontSize: 11, color: '#666'},
 
@@ -555,6 +658,8 @@ const styles = StyleSheet.create({
     padding: 2,
     justifyContent: 'space-between',
     position: 'absolute',
+    zIndex: 2,
+    
   },
   courseName: {color: '#fff', fontSize: 13, fontWeight: '700'},
   courseTeacher: {color: '#fff', fontSize: 11, opacity: 0.85},
@@ -593,4 +698,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#333',
   },
+  periodText:{fontSize:20,color:'#333',marginBottom:0},
+  periodLabel:{color:'#333',fontSize:14},
+  periodButton:{fontSize:30,color:'#333',marginBottom:0,lineHeight:29},
+  periodButtonBox:{borderWidth:1,borderColor:'#333',width:25,height:25,alignItems:'center',justifyContent:'center',marginHorizontal:10}
 });
