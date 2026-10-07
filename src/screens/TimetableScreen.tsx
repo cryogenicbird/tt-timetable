@@ -33,6 +33,9 @@ const DEFAULT_BACKGROUND = require('../pic/1.jpg');
 const DEFAULT_LAT = '29.36';
 const DEFAULT_LON = '106.18';
 
+// 天气后端地址（腾讯云轻量服务器）
+const WEATHER_BASE = 'http://124.223.162.5:8080/weather/hourly';
+
 /** 午休的空隙 */
 const LUNCH_GAP =2;
 
@@ -353,7 +356,7 @@ const [weatherMsg, setWeatherMsg] = useState('');
   // 拉天气数据
   const fetchWeather = async (lat: string, lon: string) => {
     try {
-      const res = await fetch(`http://localhost:8080/weather/hourly/${lat}/${lon}`);
+      const res = await fetch(`${WEATHER_BASE}/${lat}/${lon}`);
       const data = await res.json();
       setWeather(data);
     } catch (err) {
