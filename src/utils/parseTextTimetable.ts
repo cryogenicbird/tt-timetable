@@ -54,9 +54,9 @@ export default function parseTextTimetable(text: string) {
       throw new Error(`格式错误：${line}\n请严格按示例格式，每行一个课程`);
     }
     const startSection = parseInt(sectionMatch[0], 10);
-    const endSection = parseInt(sectionMatch[1], 10);
+    const endSection = parseInt(sectionMatch[1] ?? sectionMatch[0], 10);
     const startWeek = parseInt(weekMatch[0], 10);
-    const endWeek = parseInt(weekMatch[1], 10);
+    const endWeek = parseInt(weekMatch[1] ?? weekMatch[0], 10);
 
     // 7. 生成课程对象（按每个周段展开）
     results.push({

@@ -1,5 +1,5 @@
 import React from 'react';
-import {View, Text, TouchableOpacity, Modal, StyleSheet, StatusBar} from 'react-native';
+import {View, Text, TouchableOpacity, Modal, StyleSheet} from 'react-native';
 
 interface BaseModalProps {
   visible: boolean;
