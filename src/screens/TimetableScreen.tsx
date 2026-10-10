@@ -368,6 +368,16 @@ const WeatherPage = ({
           );
         })}
       </View>
+      {/* 和风天气开发者许可要求：数据来源声明与数据共同显示 */}
+      <Text
+        style={{
+          textAlign: 'center',
+          fontSize: 10,
+          color: '#999',
+          paddingBottom: 4,
+        }}>
+        天气数据来源：和风天气
+      </Text>
     </View>
   );
 };
