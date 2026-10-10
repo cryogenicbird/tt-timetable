@@ -517,8 +517,6 @@ export default function TimetableScreen() {
       if (savedMarkerVisible) {
         setMarkerVisible(JSON.parse(savedMarkerVisible));
       }
-      // 加载相册背景图片
-      await loadBackgroundImage();
     })();
   }, []);
   // 拉天气数据
@@ -577,6 +575,9 @@ export default function TimetableScreen() {
         console.error('定位流程异常:', err);
         setWeatherMsg('请授予应用定位权限并打开定位以获得天气服务');
       }
+      // 定位权限弹窗尘埃落定后，再申请相册权限：Android 系统权限弹窗一次只能
+      // 弹一个，并发申请会撞车——相册的请求被静默吞掉，只能等下次启动才出现
+      await loadBackgroundImage();
     })();
   }, []);
 
