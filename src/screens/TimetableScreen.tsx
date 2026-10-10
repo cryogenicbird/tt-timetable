@@ -244,7 +244,7 @@ const WeatherPage = ({
           fontSize: 12,
           color: '#666',
         }}>
-        {lat}, {lon}
+        {lat}, {lon} 天气数据来源：和风天气
       </Text>
       {/* 标题下移、贴近详情图 */}
       <Text
@@ -368,16 +368,6 @@ const WeatherPage = ({
           );
         })}
       </View>
-      {/* 和风天气开发者许可要求：数据来源声明与数据共同显示 */}
-      <Text
-        style={{
-          textAlign: 'center',
-          fontSize: 10,
-          color: '#999',
-          paddingBottom: 4,
-        }}>
-        天气数据来源：和风天气
-      </Text>
     </View>
   );
 };
