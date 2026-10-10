@@ -244,7 +244,7 @@ const WeatherPage = ({
           fontSize: 12,
           color: '#666',
         }}>
-        {lat}, {lon} 天气数据来源：和风天气
+        {lat}, {lon} （天气数据来源：和风天气）
       </Text>
       {/* 标题下移、贴近详情图 */}
       <Text
@@ -322,7 +322,7 @@ const WeatherPage = ({
         </ScrollView>
       </View>
       {/* 十天列表：点行切换，当前行高亮 */}
-      <View style={{marginTop: 8, flex: 1}}>
+      <View style={{marginTop: 5, flex: 1}}>
         {groups.map((g, i) => {
           const gTemps = g.hours.map(h => h.temperature.value);
           const gMin = Math.min(...gTemps);
@@ -336,7 +336,7 @@ const WeatherPage = ({
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 paddingHorizontal: 16,
-                paddingVertical: 7,
+                paddingVertical: 5,
                 borderRadius: 8,
                 backgroundColor:
                   i === index ? 'rgba(255,255,255,0.55)' : 'transparent',
