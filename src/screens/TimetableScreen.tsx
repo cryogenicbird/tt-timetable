@@ -206,12 +206,14 @@ const WeatherPage = ({
   onSelect,
   lat,
   lon,
+  onOpenManualLoc,
 }: {
   groups: {key: string; label: string; hours: HourlyForecast[]}[];
   index: number;
   onSelect: (i: number) => void;
   lat: string;
   lon: string;
+  onOpenManualLoc: () => void;
 }) => {
   const day = groups[index];
   const chartRef = useRef<ScrollView>(null);
@@ -236,7 +238,9 @@ const WeatherPage = ({
   return (
     <View style={{flex: 1}}>
       {/* 左上角：当前天气所属经纬度 */}
-      <Text
+       <TouchableOpacity
+       onPress={onOpenManualLoc}>
+        <Text
         style={{
           position: 'absolute',
           top: 8,
@@ -245,8 +249,8 @@ const WeatherPage = ({
           color: '#666',
         }}>
         {lat}, {lon} （天气数据来源：和风天气）
-      </Text>
-      {/* 标题下移、贴近详情图 */}
+        </Text>
+      </TouchableOpacity>
       <Text
         style={{
           textAlign: 'center',
@@ -402,6 +406,7 @@ export default function TimetableScreen() {
   const [activeModal, setActiveModal] = useState<
     | 'settings'
     | 'import'
+    | 'manualLoc'
     | 'date'
     | 'period'
     | 'appearance'
@@ -565,8 +570,7 @@ export default function TimetableScreen() {
         console.error('定位流程异常:', err);
         setWeatherMsg('请授予应用定位权限并打开定位以获得天气服务');
       }
-      // 定位权限弹窗尘埃落定后，再申请相册权限：Android 系统权限弹窗一次只能
-      // 弹一个，并发申请会撞车——相册的请求被静默吞掉，只能等下次启动才出现
+    
       await loadBackgroundImage();
     })();
   }, []);
@@ -954,6 +958,7 @@ export default function TimetableScreen() {
                   onSelect={setDayIndex}
                   lat={myLat}
                   lon={myLon}
+                  onOpenManualLoc={() => setActiveModal('manualLoc')}
                 />
               ) : (
                 <Text
@@ -1304,8 +1309,42 @@ export default function TimetableScreen() {
             整门课删除（{courseWeekSpan} 周全删）
           </Text>
         </TouchableOpacity>
+      </BaseModal>   
+      <BaseModal
+        visible={activeModal === 'manualLoc'}
+        title="定位"
+        onClose={() => setActiveModal(null)}>
+        <TouchableOpacity>
+          <Text>历史记录（待完善）</Text>
+        </TouchableOpacity>
+        <TextInput
+          style={[styles.textInput, {height: 40}]}
+          placeholder={
+            myLat && myLon
+              ? `当前：${myLat},${myLon}`
+              : '请输入经纬度，格式：纬度,经度'
+          }
+          onEndEditing={e => {
+            const input = e.nativeEvent.text.split(',');
+            if (
+              input.length === 2 &&
+              !isNaN(Number(input[0])) &&
+              !isNaN(Number(input[1]))
+            ) {
+              setMyLat(input[0]);
+              setMyLon(input[1]);
+              AsyncStorage.setItem('last_lat', input[0]);
+              AsyncStorage.setItem('last_lon', input[1]);
+              fetchWeather(input[0], input[1]);
+              setActiveModal(null);
+            } else {
+              Alert.alert('提示', '格式应为：纬度,经度（如 39.92,116.41）');
+            }
+          }}
+        />
       </BaseModal>
     </View>
+
   );
 }
 
