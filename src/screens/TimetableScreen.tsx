@@ -33,6 +33,9 @@ const DEFAULT_LON = '106.18';
 // 天气后端地址（腾讯云轻量服务器）
 const WEATHER_BASE = 'http://124.223.162.5:8080/weather/hourly';
 
+// 认证接口地址（注册/登录）
+const AUTH_BASE = 'http://124.223.162.5:8080';
+
 /** 午休的空隙 */
 const LUNCH_GAP = 2;
 
@@ -207,6 +210,7 @@ const WeatherPage = ({
   lat,
   lon,
   onOpenManualLoc,
+  updatedAt,
 }: {
   groups: {key: string; label: string; hours: HourlyForecast[]}[];
   index: number;
@@ -214,6 +218,7 @@ const WeatherPage = ({
   lat: string;
   lon: string;
   onOpenManualLoc: () => void;
+  updatedAt: number | null;
 }) => {
   const day = groups[index];
   const chartRef = useRef<ScrollView>(null);
@@ -248,7 +253,7 @@ const WeatherPage = ({
           fontSize: 12,
           color: '#666',
         }}>
-        {lat}, {lon} （天气数据来源：和风天气）
+        {lat}, {lon} {updatedAt !== null ? Math.floor((Date.now() - updatedAt) / 60000) : '--'}分钟前更新 （数据来源：和风天气）
         </Text>
       </TouchableOpacity>
       <Text
@@ -412,6 +417,7 @@ export default function TimetableScreen() {
     | 'appearance'
     | 'detail'
     | 'confirmDelete'
+    | 'auth'
     | null
   >(null);
   const [Section_start_times, setSection_start_times] = useState([
@@ -441,6 +447,13 @@ export default function TimetableScreen() {
   const [myLat, setMyLat] = useState(DEFAULT_LAT);
   const [myLon, setMyLon] = useState(DEFAULT_LON);
   const [weatherMsg, setWeatherMsg] = useState('');
+  // 天气数据成功拉取的时间戳（用于"X 分钟前更新"）
+  const [weatherFetchedAt, setWeatherFetchedAt] = useState<number | null>(
+    null,
+  );
+  const [userToken, setUserToken] = useState<string | null>(null);
+  const [authName, setAuthName] = useState('');
+  const [authPwd, setAuthPwd] = useState('');
   // 加载并随机选择背景图片
   const loadBackgroundImage = async () => {
     const images = await loadFolderImages('bg');
@@ -512,19 +525,67 @@ export default function TimetableScreen() {
       if (savedMarkerVisible) {
         setMarkerVisible(JSON.parse(savedMarkerVisible));
       }
+      //加载登录 token
+      const savedToken = await AsyncStorage.getItem('user_token');
+      if (savedToken) {
+        setUserToken(savedToken);
+      }
     })();
   }, []);
   // 拉天气数据
   const fetchWeather = async (lat: string, lon: string) => {
     try {
-      const res = await fetch(`${WEATHER_BASE}/${lat}/${lon}`);
+      // 从存储现读 token，不依赖闭包里的 state
+      const token = await AsyncStorage.getItem('user_token');
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+      const res = await fetch(`${WEATHER_BASE}/${lat}/${lon}`, {headers});
+      if (res.status === 401) {
+        setWeather(null);
+        setWeatherMsg('请先登录（设置 → 登录）');
+        return;
+      }
       const data = await res.json();
       setWeather(data);
+      setWeatherFetchedAt(Date.now());
     } catch (err) {
       console.error('天气获取失败:', err);
       setWeatherFailed(true);
     }
   };
+
+  /** 登录/注册：成功存 token + 立刻用新身份重拉天气 */
+  const auth = async (mode: 'login' | 'register') => {
+    try {
+      const res = await fetch(`${AUTH_BASE}/${mode}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({username: authName, password: authPwd}),
+      });
+      const data = await res.json();
+      if (data.token) {
+        await AsyncStorage.setItem('user_token', data.token);
+        setUserToken(data.token);
+        setActiveModal(null);
+        Alert.alert('成功', mode === 'login' ? '登录成功' : '注册成功');
+        fetchWeather(myLat, myLon);
+      } else {
+        Alert.alert('失败', data.message || '出错了');
+      }
+    } catch (err) {
+      Alert.alert('失败', '网络错误');
+    }
+  };
+
+  // 每 60 秒 tick 一次：tick 本身不用读，它只负责触发重渲染，
+  // 让天气页的"X 分钟前更新"重新计算（父组件重渲染会传导给 WeatherPage）
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 60000);
+    return () => clearInterval(id); // 卸载时清理定时器，防内存泄漏
+  }, []);
 
   // 进 App：权限 → 定位（失败回退上次坐标）→ 拉天气
   useEffect(() => {
@@ -959,6 +1020,7 @@ export default function TimetableScreen() {
                   lat={myLat}
                   lon={myLon}
                   onOpenManualLoc={() => setActiveModal('manualLoc')}
+                  updatedAt={weatherFetchedAt}
                 />
               ) : (
                 <Text
@@ -1060,6 +1122,25 @@ export default function TimetableScreen() {
           style={styles.settingsButton}
           onPress={() => setActiveModal('appearance')}>
           <Text style={styles.settingsButtonText}>外观设置</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.settingsButton}
+          onPress={() => {
+            if (userToken) {
+              AsyncStorage.removeItem('user_token');
+              setUserToken(null);
+              setWeather(null);
+              setWeatherFetchedAt(null);
+              setWeatherMsg('已退出登录');
+              Alert.alert('已退出登录');
+            } else {
+              setActiveModal('auth');
+            }
+          }}>
+          <Text style={styles.settingsButtonText}>
+            {userToken ? '退出登录' : '登录 / 注册'}
+          </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -1342,6 +1423,36 @@ export default function TimetableScreen() {
             }
           }}
         />
+      </BaseModal>
+
+      {/* 登录/注册弹窗 */}
+      <BaseModal
+        visible={activeModal === 'auth'}
+        title="登录 / 注册"
+        onClose={() => setActiveModal(null)}>
+        <TextInput
+          style={[styles.textInput, {height: 40}]}
+          value={authName}
+          onChangeText={setAuthName}
+          placeholder="用户名"
+        />
+        <TextInput
+          style={[styles.textInput, {height: 40}]}
+          value={authPwd}
+          onChangeText={setAuthPwd}
+          placeholder="密码（至少 6 位）"
+          secureTextEntry
+        />
+        <TouchableOpacity
+          style={styles.settingsButton}
+          onPress={() => auth('login')}>
+          <Text style={styles.settingsButtonText}>登录</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.settingsButton}
+          onPress={() => auth('register')}>
+          <Text style={styles.settingsButtonText}>注册新账号</Text>
+        </TouchableOpacity>
       </BaseModal>
     </View>
 
