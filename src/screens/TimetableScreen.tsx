@@ -565,7 +565,7 @@ export default function TimetableScreen() {
         body: JSON.stringify({username: authName, password: authPwd}),
       });
       const data = await res.json();
-      if (data.token) {
+      if (data.token||(mode==='register' && data.code===0)) {
         await AsyncStorage.setItem('user_token', data.token);
         setUserToken(data.token);
         setActiveModal(null);
