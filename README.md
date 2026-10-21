@@ -28,6 +28,14 @@
 - **定位**：Android 定位权限申请，成功后经纬度本地记忆（AsyncStorage），定位失败回退上次坐标
 - **课程格天气预警**：按课程时间窗（±20 分钟）匹配逐小时预报，降水概率 >60% 显示"图标！"、30~60% 显示"图标？"（雷暴/雨/雪/冰区分图标）
 - **天气页**：下滑进入。十天列表每行 = 日期 + 单日代表图标 + 全天温度极值（单日图标算法：早 8~晚 10 窗口、坏天气优先、无降水看云量）；上方单日 24 小时图标详情图可横向滑动，点击日期行切换查看天
+- **手动定位**：天气页点坐标可手动输入经纬度查天气（格式校验 + 持久化）
+- **数据新鲜度**：天气页显示"X 分钟前更新"，每 60 秒自动刷新
+
+### 账号系统（依赖后端 [weather-server](https://github.com/cryogenicbird/weather-server)）
+
+- **注册 / 登录**：BCrypt 密码哈希入库（后端 MyBatis + MySQL），登录返回一年期 JWT
+- **接口鉴权**：App 持久化 token（AsyncStorage），每个天气请求带 `Authorization: Bearer`；后端 HandlerInterceptor 验签（Ed25519）+ 过期检查，未登录 401
+- **限流**：后端固定窗口限流（60 次/分，超限 429）
 
 ## 技术栈
 
@@ -36,8 +44,8 @@
 - @react-native-camera-roll/camera-roll（相册背景）
 - @react-native-community/slider（透明度滑块；4.5.7 兼容旧架构）
 - @react-native-community/geolocation（定位）
-- Jest + react-test-renderer（冒烟测试，原生模块 mock）
-- 后端：Java 21 / Spring Boot（独立仓库 [weather-server](https://github.com/cryogenicbird/weather-server)：Ed25519 私钥签名 JWT 调用和风天气 API、响应裁剪，已部署腾讯云轻量 + systemd 守护，App 直连公网）
+- Jest + @testing-library/react-native（冒烟测试，原生模块 mock）
+- 后端：Java 21 / Spring Boot（独立仓库 [weather-server](https://github.com/cryogenicbird/weather-server)：Ed25519 JWT 签发/验签、接口鉴权与限流、响应裁剪，已部署腾讯云轻量 + systemd 守护，App 直连公网）
 
 ## 运行
 
@@ -82,7 +90,12 @@ cd android
 ├── index.js                     # RN 入口（AppRegistry 注册）
 └── src/
     ├── screens/
-    │   └── TimetableScreen.tsx  # 主页面（状态中枢 + 课表渲染 + 天气页）
+    │   ├── TimetableScreen.tsx  # 主页面（状态中枢 + 课表渲染）
+    │   ├── styles.ts            # 全部样式
+    │   └── timetable/
+    │       ├── WeatherPage.tsx  # 天气页组件
+    │       ├── weatherIcons.ts  # 天气图标算法（纯函数）
+    │       └── weatherTypes.ts  # 天气数据类型
     ├── component/
     │   └── BaseModal.tsx        # 通用弹窗组件
     ├── utils/
@@ -91,10 +104,12 @@ cd android
     │   └── hasAndroidPermission.ts# 相册权限（Android 版本分支）
 ```
 
-## 测试
+## 测试与 CI
 
 ```bash
 npm test          # Jest 冒烟测试（__mocks__ 提供原生模块假实现）
 npx tsc --noEmit  # TypeScript 类型检查
 npx eslint .      # 代码风格检查
 ```
+
+每次 push 到 main，GitHub Actions 自动跑类型检查 + 测试（见仓库 Actions 标签页）。
