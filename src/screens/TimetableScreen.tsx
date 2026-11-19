@@ -17,6 +17,7 @@ import {
   PermissionsAndroid,
 } from 'react-native';
 import Geolocation from '@react-native-community/geolocation';
+import DocumentPicker from 'react-native-document-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import parseTextTimetable, {Course} from '../utils/parseTextTimetable';
 import {loadFolderImages} from '../utils/loadFolderImages';
@@ -140,6 +141,8 @@ export default function TimetableScreen() {
   const [userToken, setUserToken] = useState<string | null>(null);
   const [authName, setAuthName] = useState('');
   const [authPwd, setAuthPwd] = useState('');
+  // 正在等待后端把文件转成文本
+  const [converting, setConverting] = useState(false);
   // 加载并随机选择背景图片
   const loadBackgroundImage = async () => {
     const images = await loadFolderImages('bg');
@@ -216,6 +219,11 @@ export default function TimetableScreen() {
       if (savedToken) {
         setUserToken(savedToken);
       }
+      //加载上次编辑的课表文本（方便在文本框里持续修改）
+      const savedImportText = await AsyncStorage.getItem('import_text');
+      if (savedImportText) {
+        setTextContent(savedImportText);
+      }
     })();
   }, []);
   // 拉天气数据
@@ -251,17 +259,84 @@ export default function TimetableScreen() {
         body: JSON.stringify({username: authName, password: authPwd}),
       });
       const data = await res.json();
-      if (data.token||(mode==='register' && data.code===0)) {
+      if (mode === 'register') {
+        if (data.code === 0) {
+          // 注册接口不返回 token：注册成功后自动走一次登录拿 token
+          Alert.alert('成功', '注册成功，正在自动登录');
+          await auth('login');
+        } else {
+          Alert.alert('失败', data.message || '注册失败');
+        }
+        return;
+      }
+      // 登录：token 是成功标志
+      if (data.token) {
         await AsyncStorage.setItem('user_token', data.token);
         setUserToken(data.token);
         setActiveModal(null);
-        Alert.alert('成功', mode === 'login' ? '登录成功' : '注册成功');
+        Alert.alert('成功', '登录成功');
         fetchWeather(myLat, myLon);
       } else {
-        Alert.alert('失败', data.message || '出错了');
+        Alert.alert('失败', data.message || '登录失败');
       }
     } catch (err) {
-      Alert.alert('失败', '网络错误');
+      console.error('auth 失败:', err);
+      Alert.alert('失败', err instanceof Error ? err.message : '网络错误');
+    }
+  };
+
+  /** 选择 xlsx 课表文件 → 上传后端转换 → 结果填进文本框（用户检查后手动保存） */
+  const pickTimetableFile = async () => {
+    try {
+      const picked = await DocumentPicker.pick({
+        type: [DocumentPicker.types.xlsx], // 系统文件选择器只显示 xlsx
+        copyTo: 'cachesDirectory',
+      });
+      const file = picked[0];
+      setConverting(true);
+
+      const token = await AsyncStorage.getItem('user_token');
+      const form = new FormData();
+      // RN 的 FormData 支持 {uri, name, type} 形态上传本地文件
+      form.append('file', {
+        uri: file.fileCopyUri ?? file.uri,
+        name: file.name ?? 'timetable.xlsx',
+        type:
+          file.type ??
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      } as any);
+
+      const resp = await fetch(`${AUTH_BASE}/timetable/convert`, {
+        method: 'POST',
+        headers: token ? {Authorization: `Bearer ${token}`} : {},
+        body: form,
+        // 注意：不要手动设置 Content-Type，RN 会自动带 multipart 边界
+      });
+      if (resp.status === 401) {
+        Alert.alert('提示', '请先登录');
+        return;
+      }
+      if (!resp.ok) {
+        Alert.alert('转换失败', `服务返回 ${resp.status}`);
+        return;
+      }
+      const data = await resp.json();
+      if (data.text) {
+        setTextContent(data.text);
+        AsyncStorage.setItem('import_text', data.text);
+        Alert.alert('转换完成', '请检查文本内容，确认无误后点击保存');
+      } else {
+        Alert.alert('转换失败', data.message || '没有拿到内容');
+      }
+    } catch (err) {
+      // 用户点了取消不算错误
+      if (DocumentPicker.isCancel(err)) {
+        return;
+      }
+      console.error('文件导入失败:', err);
+      Alert.alert('失败', '选择文件或转换时出错');
+    } finally {
+      setConverting(false);
     }
   };
 
@@ -580,7 +655,12 @@ export default function TimetableScreen() {
         showsVerticalScrollIndicator={false}
         onLayout={e => setWeatherPageH(e.nativeEvent.layout.height)}
         ListHeaderComponent={
-          <View style={weatherPageH > 0 ? {height: weatherPageH} : undefined}>
+          // paddingTop 4：顶部时间标记有 top-8 的偏移，留出空间避免被列表顶部裁掉一半
+          <View
+            style={[
+              {paddingTop: 4},
+              weatherPageH > 0 ? {height: weatherPageH} : null,
+            ]}>
             {/* 手势在外层捕获*/}
             <Animated.View
               style={{transform: [{translateX}]}}
@@ -729,15 +809,30 @@ export default function TimetableScreen() {
         visible={activeModal === 'import'}
         title="导入课表"
         onClose={() => setActiveModal(null)}>
+        {/* 左上角：从 Excel 文件导入（交给后端转换） */}
+        <View style={{flexDirection: 'row', marginBottom: 6}}>
+          <TouchableOpacity onPress={pickTimetableFile} disabled={converting}>
+            <Text
+              style={{
+                fontSize: 14,
+                color: converting ? '#999' : '#007AFF',
+              }}>
+              {converting ? '正在转换…' : '📄 从 Excel 导入'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         <Text style={[styles.modalSubtitle, {fontSize: 14}]}>
-          请按以下格式粘贴课表文本（可从截图识别）：周一 C语言程序设计 王老师
-          1-2节 D1211 3-7周
+          格式：周一 C语言程序设计 王老师 1-2节 D1211 3-7周
         </Text>
 
         <TextInput
           style={styles.textInput}
           value={textContent}
           onChangeText={setTextContent}
+          onEndEditing={() => {
+            AsyncStorage.setItem('import_text', textContent);
+          }}
           multiline={true}
           placeholder="例如：周一 C语言程序设计 王老师 1-2节 D1211 3-7周"
           textAlignVertical="top"
@@ -761,9 +856,10 @@ export default function TimetableScreen() {
                 JSON.stringify(parsed),
               );
               setCourses(parsed);
+              await AsyncStorage.setItem('import_text', textContent);
               Alert.alert('成功', `共导入 ${parsed.length} 条记录`);
               setActiveModal(null);
-              setTextContent('');
+              // 文本保留在文本框里，方便之后继续修改后再次保存
             } catch (err) {
               console.error(err);
               Alert.alert(
@@ -772,7 +868,7 @@ export default function TimetableScreen() {
               );
             }
           }}>
-          <Text style={styles.importButtonText}>导入</Text>
+          <Text style={styles.importButtonText}>保存</Text>
         </TouchableOpacity>
       </BaseModal>
 

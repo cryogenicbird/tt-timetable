@@ -10,7 +10,9 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     padding: 1,
-    paddingTop: StatusBar.currentHeight ?? 5,
+    // 顶栏上下各收紧：给顶部时间标记腾出可见空间
+    paddingTop: (StatusBar.currentHeight ?? 5) - 2,
+    paddingBottom: 0,
     paddingHorizontal: 5,
     backgroundColor: 'transparent',
   },
@@ -25,7 +27,7 @@ export const styles = StyleSheet.create({
 
   weekRow: {
     flexDirection: 'row',
-    paddingVertical: 6,
+    paddingVertical: 5,
     backgroundColor: 'transparent',
   },
   weekItem: {alignItems: 'center'},
