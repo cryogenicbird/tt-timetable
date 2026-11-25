@@ -19,6 +19,10 @@ import {
 import Geolocation from '@react-native-community/geolocation';
 import DocumentPicker from 'react-native-document-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {authApi} from '../api/auth';
+import {clearToken, getToken, saveToken} from '../api/client';
+import {timetableApi} from '../api/timetable';
+import {weatherApi} from '../api/weather';
 import parseTextTimetable, {Course} from '../utils/parseTextTimetable';
 import {loadFolderImages} from '../utils/loadFolderImages';
 import BaseModal from '../component/BaseModal';
@@ -33,12 +37,6 @@ const Slider = SliderBase as unknown as React.ComponentType<any>;
 // 默认坐标（重庆大学）：没有历史定位时的兜底
 const DEFAULT_LAT = '29.36';
 const DEFAULT_LON = '106.18';
-
-// 天气后端地址（腾讯云轻量服务器）
-const WEATHER_BASE = 'http://124.223.162.5:8080/weather/hourly';
-
-// 认证接口地址（注册/登录）
-const AUTH_BASE = 'http://124.223.162.5:8080';
 
 /** 午休的空隙 */
 const LUNCH_GAP = 2;
@@ -135,9 +133,7 @@ export default function TimetableScreen() {
   const [myLon, setMyLon] = useState(DEFAULT_LON);
   const [weatherMsg, setWeatherMsg] = useState('');
   // 天气数据成功拉取的时间戳（用于"X 分钟前更新"）
-  const [weatherFetchedAt, setWeatherFetchedAt] = useState<number | null>(
-    null,
-  );
+  const [weatherFetchedAt, setWeatherFetchedAt] = useState<number | null>(null);
   const [userToken, setUserToken] = useState<string | null>(null);
   const [authName, setAuthName] = useState('');
   const [authPwd, setAuthPwd] = useState('');
@@ -215,7 +211,7 @@ export default function TimetableScreen() {
         setMarkerVisible(JSON.parse(savedMarkerVisible));
       }
       //加载登录 token
-      const savedToken = await AsyncStorage.getItem('user_token');
+      const savedToken = await getToken();
       if (savedToken) {
         setUserToken(savedToken);
       }
@@ -229,20 +225,17 @@ export default function TimetableScreen() {
   // 拉天气数据
   const fetchWeather = async (lat: string, lon: string) => {
     try {
-      // 从存储现读 token，不依赖闭包里的 state
-      const token = await AsyncStorage.getItem('user_token');
-      const headers: Record<string, string> = {};
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
-      const res = await fetch(`${WEATHER_BASE}/${lat}/${lon}`, {headers});
-      if (res.status === 401) {
-        setWeather(null);
-        setWeatherMsg('请先登录（设置 → 登录）');
+      const result = await weatherApi.getHourly(lat, lon);
+      if (!result.ok) {
+        if (result.status === 401) {
+          setWeather(null);
+          setWeatherMsg('请先登录（设置 → 登录）');
+          return;
+        }
+        setWeatherFailed(true);
         return;
       }
-      const data = await res.json();
-      setWeather(data);
+      setWeather(result.data);
       setWeatherFetchedAt(Date.now());
     } catch (err) {
       console.error('天气获取失败:', err);
@@ -253,31 +246,31 @@ export default function TimetableScreen() {
   /** 登录/注册：成功存 token + 立刻用新身份重拉天气 */
   const auth = async (mode: 'login' | 'register') => {
     try {
-      const res = await fetch(`${AUTH_BASE}/${mode}`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({username: authName, password: authPwd}),
-      });
-      const data = await res.json();
+      const params = {username: authName, password: authPwd};
+
       if (mode === 'register') {
-        if (data.code === 0) {
+        const result = await authApi.register(params);
+        if (result.ok && result.data?.code === 0) {
           // 注册接口不返回 token：注册成功后自动走一次登录拿 token
           Alert.alert('成功', '注册成功，正在自动登录');
           await auth('login');
         } else {
-          Alert.alert('失败', data.message || '注册失败');
+          Alert.alert('失败', result.message || '注册失败');
         }
         return;
       }
+
+      const result = await authApi.login(params);
       // 登录：token 是成功标志
-      if (data.token) {
-        await AsyncStorage.setItem('user_token', data.token);
-        setUserToken(data.token);
+      const token = result.data?.token;
+      if (result.ok && token) {
+        await saveToken(token);
+        setUserToken(token);
         setActiveModal(null);
         Alert.alert('成功', '登录成功');
         fetchWeather(myLat, myLon);
       } else {
-        Alert.alert('失败', data.message || '登录失败');
+        Alert.alert('失败', result.message || '登录失败');
       }
     } catch (err) {
       console.error('auth 失败:', err);
@@ -295,38 +288,21 @@ export default function TimetableScreen() {
       const file = picked[0];
       setConverting(true);
 
-      const token = await AsyncStorage.getItem('user_token');
-      const form = new FormData();
-      // RN 的 FormData 支持 {uri, name, type} 形态上传本地文件
-      form.append('file', {
-        uri: file.fileCopyUri ?? file.uri,
-        name: file.name ?? 'timetable.xlsx',
-        type:
-          file.type ??
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      } as any);
-
-      const resp = await fetch(`${AUTH_BASE}/timetable/convert`, {
-        method: 'POST',
-        headers: token ? {Authorization: `Bearer ${token}`} : {},
-        body: form,
-        // 注意：不要手动设置 Content-Type，RN 会自动带 multipart 边界
-      });
-      if (resp.status === 401) {
-        Alert.alert('提示', '请先登录');
+      const result = await timetableApi.convertXlsx(file);
+      if (!result.ok) {
+        if (result.status === 401) {
+          Alert.alert('提示', '请先登录');
+          return;
+        }
+        Alert.alert('转换失败', `服务返回 ${result.status}`);
         return;
       }
-      if (!resp.ok) {
-        Alert.alert('转换失败', `服务返回 ${resp.status}`);
-        return;
-      }
-      const data = await resp.json();
-      if (data.text) {
-        setTextContent(data.text);
-        AsyncStorage.setItem('import_text', data.text);
+      if (result.data?.text) {
+        setTextContent(result.data.text);
+        AsyncStorage.setItem('import_text', result.data.text);
         Alert.alert('转换完成', '请检查文本内容，确认无误后点击保存');
       } else {
-        Alert.alert('转换失败', data.message || '没有拿到内容');
+        Alert.alert('转换失败', result.message || '没有拿到内容');
       }
     } catch (err) {
       // 用户点了取消不算错误
@@ -342,7 +318,7 @@ export default function TimetableScreen() {
 
   // 每 60 秒 tick 一次：tick 本身不用读，它只负责触发重渲染，
   // 让天气页的"X 分钟前更新"重新计算（父组件重渲染会传导给 WeatherPage）
-  const [tick, setTick] = useState(0);
+  const [, setTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 60000);
     return () => clearInterval(id); // 卸载时清理定时器，防内存泄漏
@@ -392,7 +368,7 @@ export default function TimetableScreen() {
         console.error('定位流程异常:', err);
         setWeatherMsg('请授予应用定位权限并打开定位以获得天气服务');
       }
-    
+
       await loadBackgroundImage();
     })();
   }, []);
@@ -908,9 +884,9 @@ export default function TimetableScreen() {
 
         <TouchableOpacity
           style={styles.settingsButton}
-          onPress={() => {
+          onPress={async () => {
             if (userToken) {
-              AsyncStorage.removeItem('user_token');
+              await clearToken();
               setUserToken(null);
               setWeather(null);
               setWeatherFetchedAt(null);
@@ -1172,7 +1148,7 @@ export default function TimetableScreen() {
             整门课删除（{courseWeekSpan} 周全删）
           </Text>
         </TouchableOpacity>
-      </BaseModal>   
+      </BaseModal>
       <BaseModal
         visible={activeModal === 'manualLoc'}
         title="定位"
@@ -1237,6 +1213,5 @@ export default function TimetableScreen() {
         </TouchableOpacity>
       </BaseModal>
     </View>
-
   );
 }
